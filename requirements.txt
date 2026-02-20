@@ -1,0 +1,13 @@
+pydantic>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+pyyaml>=6.0
+openai>=1.30
+requests>=2.31
+fastapi>=0.110
+uvicorn>=0.29
+jinja2>=3.1
+typer>=0.12
+rich>=13.0
+markdownify>=0.14
+pymupdf>=1.24

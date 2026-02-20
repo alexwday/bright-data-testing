@@ -1,0 +1,143 @@
+bright_data:
+  serp_zone: "test"
+  web_unlocker_zone: "tester"
+  proxy_host: "brd.superproxy.io"
+  proxy_port: 33335
+
+agent:
+  model: "gpt-4.1"
+  max_tool_calls: 50
+  temperature: 0.2
+
+download:
+  base_dir: "downloads"
+
+document_targets:
+  - id: "report"
+    label: "Report to Shareholders"
+    keywords: ["annual report", "quarterly report", "report to shareholders"]
+    extensions: [".pdf"]
+  - id: "supp_pack"
+    label: "Supplementary Financial Information"
+    keywords: ["supplementary financial information", "supplementary package", "supplementary info pack", "supp pack"]
+    extensions: [".xlsx", ".xls", ".pdf"]
+  - id: "pillar3"
+    label: "Pillar 3 Disclosure"
+    keywords: ["pillar 3", "pillar III", "pillar 3 disclosure"]
+    extensions: [".xlsx", ".xls", ".pdf"]
+  - id: "investor_pres"
+    label: "Investor Presentation"
+    keywords: ["investor presentation", "earnings presentation", "quarterly presentation", "investor slides"]
+    extensions: [".pdf"]
+
+prebuilt_prompts:
+  - id: "bank_documents"
+    label: "Bank Financial Documents"
+    message: |
+      Download financial documents for the following Canadian bank. Start by scraping their investor relations / quarterly or financial results page to find download links.
+
+      **Banks and their IR pages** (use the correct bank; for Q4, check annual/report archives too):
+      - BMO (Quarterly/Financial Info): https://www.bmo.com/main/about-bmo/banking/investor-relations/financial-information
+      - BMO (Annual Reports / Proxy): https://www.bmo.com/main/about-bmo/investor-relations/annual-reports-proxy-circulars
+      - Scotiabank (Financial Results): https://www.scotiabank.com/ca/en/about/investors-shareholders/financial-result.html
+      - CIBC (Quarterly Results): https://www.cibc.com/en/about-cibc/investor-relations/quarterly-results.html
+      - National Bank (Quarterly Results): https://www.nbc.ca/about-us/investors/quarterly-results.html
+      - RBC (Financial Information): https://www.rbc.com/investor-relations/financial-information.html
+      - TD (Quarterly Results): https://www.td.com/ca/en/about-td/for-investors/investor-relations/financial-information/financial-reports/quarterly-results
+
+      **Documents to download** (4 types, each bank uses different names):
+
+      1. **Report to Shareholders (PDF)**
+         For Q4, this is typically the Annual Report. For Q1-Q3 it's a Quarterly Report. Note: NBC and TD may not publish a separate Q4 report (the annual report replaces it). Names vary:
+         - BMO: "Report to Shareholders" / "Annual Report to Shareholders"
+         - Scotiabank: "Quarterly Report to Shareholders" / "Annual Report"
+         - CIBC: "Report to shareholders" / "Full annual report"
+         - NBC: "Report to Shareholders" (Q4 may be absent)
+         - RBC: "Report to Shareholders" / "Annual Report"
+         - TD: "Report to Shareholders" (Q4 may be absent)
+
+      2. **Supplementary Financial Information (XLSX + PDF)**
+         Download BOTH Excel and PDF versions. Names vary:
+         - Most banks: "Supplementary Financial Information"
+         - RBC: "Financial Supplement"
+         - TD: "Supplemental Financial Information" (note: "Supplemental" not "Supplementary")
+
+      3. **Pillar 3 / Regulatory Capital Disclosure (XLSX + PDF)**
+         Download BOTH Excel and PDF versions. Names vary significantly:
+         - BMO: "Supplementary Regulatory Capital Information"
+         - Scotiabank: "Supplementary Regulatory Capital Disclosure"
+         - CIBC: "Pillar 3 Report and Supplementary Regulatory Capital Disclosure"
+         - NBC: "Supplementary Regulatory Capital and Pillar 3 Disclosure"
+         - RBC: "Pillar 3 Disclosure" (XLSX may be labeled "Quantitative Tables")
+         - TD: "Supplemental Regulatory Disclosure"
+
+      4. **Investor Presentation / Slides (PDF)**
+         Names vary:
+         - BMO/Scotiabank/CIBC: "Investor Presentation"
+         - NBC: "Analyst and Investor Presentation"
+         - RBC: "Quarterly Slides"
+         - TD: "Quarterly Results Presentation"
+
+      **Rules:**
+      - Do NOT rename files. Use the original filename from the URL exactly as-is.
+      - Execute this workflow autonomously end-to-end. Do not ask for permission to run fallback searches.
+      - After downloading, read the `first_pages_preview` returned for each PDF to confirm it's the correct document. If the content doesn't match what you expected, reject it and try a different URL.
+      - For Excel files, verify `file_inspection.valid` is true.
+      - For **Q4**, if the quarterly page is missing docs, also scrape annual-report / financial-information / archive pages for the same bank before marking items missing.
+      - If you can't find a document after 2-3 attempts, note it as missing and move on.
+      - If the IR page doesn't have what you need, search Google: "[bank name] [quarter] [year] [document type] filetype:pdf"
+
+      **Bank, quarter, and year:**
+    prefill: true
+
+  - id: "web_search"
+    label: "Web Search"
+    message: "Search the web for: "
+    prefill: true
+
+  - id: "scrape_url"
+    label: "Scrape a URL"
+    message: "Scrape and summarize the content of this URL: "
+    prefill: true
+
+  - id: "download_file"
+    label: "Find & Download File"
+    message: "Find and download the following file from the web: "
+    prefill: true
+
+banks:
+  - code: "bmo"
+    name: "Bank of Montreal"
+    ir_url: "https://www.bmo.com/main/about-bmo/banking/investor-relations/financial-information"
+    doc_hints:
+      pillar3: ["pillar 3"]
+
+  - code: "bns"
+    name: "Bank of Nova Scotia"
+    ir_url: "https://www.scotiabank.com/ca/en/about/investors-shareholders/financial-result.html"
+    doc_hints:
+      pillar3: ["pillar 3"]
+
+  - code: "cibc"
+    name: "CIBC"
+    ir_url: "https://www.cibc.com/en/about-cibc/investor-relations/quarterly-results.html"
+    doc_hints:
+      pillar3: ["pillar 3", "Basel III"]
+
+  - code: "nb"
+    name: "National Bank of Canada"
+    ir_url: "https://www.nbc.ca/about-us/investors/quarterly-results.html"
+    doc_hints:
+      pillar3: ["pillar 3"]
+
+  - code: "rbc"
+    name: "Royal Bank of Canada"
+    ir_url: "https://www.rbc.com/investor-relations/financial-information.html"
+    doc_hints:
+      pillar3: ["pillar 3"]
+
+  - code: "td"
+    name: "Toronto-Dominion Bank"
+    ir_url: "https://www.td.com/ca/en/about-td/for-investors/investor-relations/financial-information/financial-reports/quarterly-results"
+    doc_hints:
+      pillar3: ["pillar 3", "EDTF"]
