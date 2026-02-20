@@ -46,8 +46,8 @@ def fetch_oauth_access_token(
                 time.sleep(2)
 
 
-def resolve_llm_auth(settings: Settings | None = None) -> tuple[str, str, str]:
-    """Resolve LLM auth as (api_key_or_token, base_url, mode)."""
+def detect_auth_mode(settings: Settings | None = None) -> str:
+    """Determine which auth mode should be used from env configuration."""
     settings = settings or get_settings()
 
     api_key = settings.OPENAI_API_KEY.strip()
@@ -65,7 +65,7 @@ def resolve_llm_auth(settings: Settings | None = None) -> tuple[str, str, str]:
             )
         else:
             logger.info("Using OPENAI_API_KEY with official OpenAI endpoint")
-        return api_key, OFFICIAL_OPENAI_BASE_URL, "api_key_local"
+        return "api_key_local"
 
     oauth_url = settings.OAUTH_URL.strip()
     client_id = settings.CLIENT_ID.strip()
@@ -86,16 +86,25 @@ def resolve_llm_auth(settings: Settings | None = None) -> tuple[str, str, str]:
             raise ValueError(
                 "Incomplete OAuth configuration. Missing: " + ", ".join(missing)
             )
-
-        token = fetch_oauth_access_token(
-            oauth_url=oauth_url,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        logger.info("Using OAuth token with custom base URL")
-        return token, base_url, "oauth"
+        return "oauth"
 
     raise ValueError(
         "No LLM auth configured. Set OPENAI_API_KEY, or set OAUTH_URL, CLIENT_ID, CLIENT_SECRET, and AZURE_BASE_URL."
     )
 
+
+def resolve_llm_auth(settings: Settings | None = None) -> tuple[str, str, str]:
+    """Resolve LLM auth as (api_key_or_token, base_url, mode)."""
+    settings = settings or get_settings()
+    mode = detect_auth_mode(settings)
+
+    if mode == "api_key_local":
+        return settings.OPENAI_API_KEY.strip(), OFFICIAL_OPENAI_BASE_URL, mode
+
+    token = fetch_oauth_access_token(
+        oauth_url=settings.OAUTH_URL.strip(),
+        client_id=settings.CLIENT_ID.strip(),
+        client_secret=settings.CLIENT_SECRET.strip(),
+    )
+    logger.info("Using OAuth token with custom base URL")
+    return token, settings.AZURE_BASE_URL.strip(), mode

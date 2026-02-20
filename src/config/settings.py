@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     CLIENT_ID: str = ""
     CLIENT_SECRET: str = ""
     AZURE_BASE_URL: str = ""
+    AGENT_MODEL: str = ""
+    AGENT_MODEL_OAUTH: str = ""
+    AGENT_MAX_TOKENS: int | None = None
+    AGENT_MAX_TOKENS_OAUTH: int | None = None
     BRIGHT_DATA_API_TOKEN: str = ""
     BRIGHT_DATA_PROXY_PASSWORD: str = ""
 

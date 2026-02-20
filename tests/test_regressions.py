@@ -44,8 +44,10 @@ class _FakeAssistantMessage:
 class _FakeCompletions:
     def __init__(self, responses: list[_FakeAssistantMessage]):
         self._responses = responses
+        self.last_kwargs = None
 
     def create(self, **_: dict) -> SimpleNamespace:
+        self.last_kwargs = _
         msg = self._responses.pop(0)
         return SimpleNamespace(
             choices=[SimpleNamespace(message=msg)],
@@ -121,6 +123,9 @@ class RegressionTests(unittest.TestCase):
         with patch("src.agent.loop.get_config", return_value=fake_cfg), patch(
             "src.agent.loop.get_openai_client", return_value=fake_client
         ), patch(
+            "src.agent.loop.resolve_chat_runtime",
+            return_value=("fake-model", None, "api_key_local"),
+        ), patch(
             "src.agent.loop.log_llm_call"
         ), patch(
             "src.agent.loop.log_tool_call"
@@ -179,6 +184,9 @@ class RegressionTests(unittest.TestCase):
 
         with patch("src.agent.loop.get_config", return_value=fake_cfg), patch(
             "src.agent.loop.get_openai_client", return_value=fake_client
+        ), patch(
+            "src.agent.loop.resolve_chat_runtime",
+            return_value=("fake-model", None, "api_key_local"),
         ), patch(
             "src.agent.loop.log_llm_call"
         ), patch(
@@ -251,6 +259,9 @@ class RegressionTests(unittest.TestCase):
         with patch("src.agent.loop.get_config", return_value=fake_cfg), patch(
             "src.agent.loop.get_openai_client", return_value=fake_client
         ), patch(
+            "src.agent.loop.resolve_chat_runtime",
+            return_value=("fake-model", None, "api_key_local"),
+        ), patch(
             "src.agent.loop.log_llm_call"
         ), patch(
             "src.agent.loop.log_tool_call"
@@ -265,6 +276,34 @@ class RegressionTests(unittest.TestCase):
         system_messages = [m for m in conv.messages if m.role == "system"]
         self.assertEqual(len(system_messages), 1)
         self.assertIn("DOWNLOAD VERIFICATION WARNING", system_messages[0].content)
+
+    def test_process_message_passes_max_tokens_from_runtime(self):
+        conv = Conversation()
+        conv.add_user_message("hello")
+
+        final_msg = _FakeAssistantMessage(content="done", tool_calls=None)
+        fake_client = _FakeOpenAIClient([final_msg])
+
+        fake_cfg = SimpleNamespace(
+            agent=SimpleNamespace(model="config-model", max_tool_calls=5, temperature=0.0)
+        )
+
+        with patch("src.agent.loop.get_config", return_value=fake_cfg), patch(
+            "src.agent.loop.get_openai_client", return_value=fake_client
+        ), patch(
+            "src.agent.loop.resolve_chat_runtime",
+            return_value=("oauth-model", 9000, "oauth"),
+        ), patch(
+            "src.agent.loop.log_llm_call"
+        ), patch(
+            "src.agent.loop.log_tool_call"
+        ):
+            process_message(conv)
+
+        kwargs = fake_client.chat.completions.last_kwargs
+        self.assertIsNotNone(kwargs)
+        self.assertEqual(kwargs["model"], "oauth-model")
+        self.assertEqual(kwargs["max_tokens"], 9000)
 
 
 if __name__ == "__main__":

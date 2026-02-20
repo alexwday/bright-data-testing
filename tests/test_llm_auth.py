@@ -4,8 +4,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.infra.llm import get_openai_client
-from src.infra.oauth import OFFICIAL_OPENAI_BASE_URL, fetch_oauth_access_token, resolve_llm_auth
+from src.infra.llm import get_openai_client, resolve_chat_runtime
+from src.infra.oauth import (
+    OFFICIAL_OPENAI_BASE_URL,
+    detect_auth_mode,
+    fetch_oauth_access_token,
+    resolve_llm_auth,
+)
 
 
 class LLMAuthTests(unittest.TestCase):
@@ -16,6 +21,10 @@ class LLMAuthTests(unittest.TestCase):
             CLIENT_ID="client-id",
             CLIENT_SECRET="client-secret",
             AZURE_BASE_URL="https://custom-llm.example/v1",
+            AGENT_MODEL="",
+            AGENT_MODEL_OAUTH="",
+            AGENT_MAX_TOKENS=None,
+            AGENT_MAX_TOKENS_OAUTH=None,
         )
 
         with patch("src.infra.oauth.fetch_oauth_access_token") as fetch_mock:
@@ -33,6 +42,10 @@ class LLMAuthTests(unittest.TestCase):
             CLIENT_ID="client-id",
             CLIENT_SECRET="client-secret",
             AZURE_BASE_URL="https://custom-llm.example/v1",
+            AGENT_MODEL="",
+            AGENT_MODEL_OAUTH="",
+            AGENT_MAX_TOKENS=None,
+            AGENT_MAX_TOKENS_OAUTH=None,
         )
 
         with patch(
@@ -56,6 +69,10 @@ class LLMAuthTests(unittest.TestCase):
             CLIENT_ID="client-id",
             CLIENT_SECRET="client-secret",
             AZURE_BASE_URL="",
+            AGENT_MODEL="",
+            AGENT_MODEL_OAUTH="",
+            AGENT_MAX_TOKENS=None,
+            AGENT_MAX_TOKENS_OAUTH=None,
         )
 
         with self.assertRaises(ValueError) as context:
@@ -83,6 +100,57 @@ class LLMAuthTests(unittest.TestCase):
         self.assertEqual(token, "oauth-token")
         session.post.assert_called_once()
 
+    def test_detect_auth_mode_oauth_when_complete(self):
+        settings = SimpleNamespace(
+            OPENAI_API_KEY="",
+            OAUTH_URL="https://oauth.example/token",
+            CLIENT_ID="client-id",
+            CLIENT_SECRET="client-secret",
+            AZURE_BASE_URL="https://custom-llm.example/v1",
+        )
+        mode = detect_auth_mode(settings)
+        self.assertEqual(mode, "oauth")
+
+    def test_resolve_chat_runtime_uses_oauth_overrides(self):
+        config = SimpleNamespace(agent=SimpleNamespace(model="config-model"))
+        settings = SimpleNamespace(
+            OPENAI_API_KEY="",
+            OAUTH_URL="https://oauth.example/token",
+            CLIENT_ID="client-id",
+            CLIENT_SECRET="client-secret",
+            AZURE_BASE_URL="https://custom-llm.example/v1",
+            AGENT_MODEL="local-model",
+            AGENT_MODEL_OAUTH="corp-model",
+            AGENT_MAX_TOKENS=2000,
+            AGENT_MAX_TOKENS_OAUTH=8000,
+        )
+
+        model, max_tokens, mode = resolve_chat_runtime(config, settings)
+
+        self.assertEqual(mode, "oauth")
+        self.assertEqual(model, "corp-model")
+        self.assertEqual(max_tokens, 8000)
+
+    def test_resolve_chat_runtime_local_uses_default_model_and_optional_max_tokens(self):
+        config = SimpleNamespace(agent=SimpleNamespace(model="config-model"))
+        settings = SimpleNamespace(
+            OPENAI_API_KEY="sk-test",
+            OAUTH_URL="",
+            CLIENT_ID="",
+            CLIENT_SECRET="",
+            AZURE_BASE_URL="",
+            AGENT_MODEL="",
+            AGENT_MODEL_OAUTH="corp-model-ignored",
+            AGENT_MAX_TOKENS=None,
+            AGENT_MAX_TOKENS_OAUTH=8000,
+        )
+
+        model, max_tokens, mode = resolve_chat_runtime(config, settings)
+
+        self.assertEqual(mode, "api_key_local")
+        self.assertEqual(model, "config-model")
+        self.assertIsNone(max_tokens)
+
     @patch("src.infra.llm.OpenAI")
     @patch("src.infra.llm.resolve_llm_auth", return_value=("token", "https://base/v1", "oauth"))
     @patch("src.infra.llm.configure_rbc_security_certs")
@@ -106,4 +174,3 @@ class LLMAuthTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

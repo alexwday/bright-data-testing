@@ -7,7 +7,7 @@ import logging
 import time
 
 from src.config.settings import get_config
-from src.infra.llm import get_openai_client
+from src.infra.llm import get_openai_client, resolve_chat_runtime
 from src.tools import bright_data
 from src.tools.definitions import TOOLS
 
@@ -37,6 +37,7 @@ def process_message(conversation: Conversation) -> None:
     """
     cfg = get_config()
     client = get_openai_client()
+    model_name, max_tokens, _auth_mode = resolve_chat_runtime(cfg)
 
     # Ensure system prompt is first message in openai context
     if not conversation.openai_messages or conversation.openai_messages[0].get("role") != "system":
@@ -52,12 +53,15 @@ def process_message(conversation: Conversation) -> None:
         while tool_call_count < max_calls:
             # Call LLM
             llm_start = time.time()
-            response = client.chat.completions.create(
-                model=cfg.agent.model,
-                messages=conversation.openai_messages,
-                tools=TOOLS,
-                temperature=cfg.agent.temperature,
-            )
+            request_kwargs = {
+                "model": model_name,
+                "messages": conversation.openai_messages,
+                "tools": TOOLS,
+                "temperature": cfg.agent.temperature,
+            }
+            if max_tokens is not None:
+                request_kwargs["max_tokens"] = max_tokens
+            response = client.chat.completions.create(**request_kwargs)
             llm_duration = int((time.time() - llm_start) * 1000)
 
             choice = response.choices[0]
@@ -66,7 +70,7 @@ def process_message(conversation: Conversation) -> None:
 
             log_llm_call(
                 conversation_id=conversation.id,
-                model=cfg.agent.model,
+                model=model_name,
                 prompt_tokens=usage.prompt_tokens if usage else 0,
                 completion_tokens=usage.completion_tokens if usage else 0,
                 duration_ms=llm_duration,
