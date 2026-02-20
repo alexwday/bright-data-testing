@@ -39,3 +39,15 @@ python -m src serve --host 0.0.0.0 --port 8000
 Open:
 
 - `http://127.0.0.1:8000`
+
+## Debug Logging
+
+The agent writes structured JSONL logs to:
+
+- `logs/tool_calls.jsonl`
+
+This file includes:
+
+- LLM call records (`type: "llm_call"`) with model, token usage, finish reason, and tool-call count
+- Tool execution records (`type: "tool_call"`)
+- Loop lifecycle/debug events (`type: "agent_event"`) including why the loop stopped

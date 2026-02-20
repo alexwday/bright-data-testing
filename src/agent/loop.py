@@ -11,7 +11,7 @@ from src.infra.llm import get_openai_client, resolve_chat_runtime
 from src.tools import bright_data
 from src.tools.definitions import TOOLS
 
-from .logger import log_llm_call, log_tool_call
+from .logger import log_agent_event, log_llm_call, log_tool_call
 from .models import Conversation
 from .prompts import build_system_prompt
 
@@ -37,7 +37,18 @@ def process_message(conversation: Conversation) -> None:
     """
     cfg = get_config()
     client = get_openai_client()
-    model_name, max_tokens, _auth_mode = resolve_chat_runtime(cfg)
+    model_name, max_tokens, auth_mode = resolve_chat_runtime(cfg)
+    log_agent_event(
+        conversation.id,
+        "conversation_started",
+        {
+            "model": model_name,
+            "auth_mode": auth_mode,
+            "request_max_tokens": max_tokens,
+            "max_tool_calls": cfg.agent.max_tool_calls,
+            "temperature": cfg.agent.temperature,
+        },
+    )
 
     # Ensure system prompt is first message in openai context
     if not conversation.openai_messages or conversation.openai_messages[0].get("role") != "system":
@@ -67,6 +78,8 @@ def process_message(conversation: Conversation) -> None:
             choice = response.choices[0]
             assistant_msg = choice.message
             usage = response.usage
+            finish_reason = getattr(choice, "finish_reason", None)
+            tool_names = [tc.function.name for tc in (assistant_msg.tool_calls or [])]
 
             log_llm_call(
                 conversation_id=conversation.id,
@@ -75,16 +88,35 @@ def process_message(conversation: Conversation) -> None:
                 completion_tokens=usage.completion_tokens if usage else 0,
                 duration_ms=llm_duration,
                 tool_calls_count=len(assistant_msg.tool_calls or []),
+                finish_reason=str(finish_reason) if finish_reason is not None else None,
+                response_preview=(assistant_msg.content or ""),
+                request_max_tokens=max_tokens,
+                auth_mode=auth_mode,
+                tool_names=tool_names,
             )
 
             # No tool calls — final text response
             if not assistant_msg.tool_calls:
                 text = assistant_msg.content or ""
+                log_agent_event(
+                    conversation.id,
+                    "loop_stopped_no_tool_calls",
+                    {
+                        "finish_reason": str(finish_reason) if finish_reason is not None else None,
+                        "tool_call_count_total": tool_call_count,
+                        "response_preview": text,
+                    },
+                )
                 conversation.add_assistant_message(text)
                 conversation.openai_messages.append({"role": "assistant", "content": text})
                 break
 
             # Has tool calls — add assistant message to openai context
+            log_agent_event(
+                conversation.id,
+                "llm_requested_tools",
+                {"tool_names": tool_names, "count": len(tool_names)},
+            )
             conversation.openai_messages.append(assistant_msg.model_dump())
 
             # If the assistant also included text, show it
@@ -171,11 +203,21 @@ def process_message(conversation: Conversation) -> None:
 
         else:
             # Hit max tool calls
+            log_agent_event(
+                conversation.id,
+                "loop_stopped_max_tool_calls",
+                {"max_tool_calls": max_calls, "tool_call_count_total": tool_call_count},
+            )
             conversation.add_system_message(
                 f"Reached maximum of {max_calls} tool calls. Stopping."
             )
 
     except Exception as exc:
+        log_agent_event(
+            conversation.id,
+            "loop_exception",
+            {"error": str(exc), "tool_call_count_total": tool_call_count},
+        )
         logger.exception("Agent error in conversation %s", conversation.id)
         conversation.add_system_message(f"Error: {exc}")
 
