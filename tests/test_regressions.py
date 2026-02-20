@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -61,6 +63,28 @@ class _FakeOpenAIClient:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_download_route_accepts_basename_nested_and_absolute_paths(self):
+        app = create_app()
+        filename = "Quarterly Report (Q4).pdf"
+        content = b"%PDF-1.4 fake"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dl_dir = Path(tmpdir)
+            (dl_dir / filename).write_bytes(content)
+            fake_cfg = SimpleNamespace(download=SimpleNamespace(base_dir=str(dl_dir)))
+
+            with patch("src.web.routes.get_config", return_value=fake_cfg):
+                with TestClient(app) as client:
+                    test_paths = [
+                        filename,
+                        f"downloads/{filename}",
+                        str(dl_dir / filename),
+                    ]
+                    for path_value in test_paths:
+                        resp = client.get("/api/files/download", params={"path": path_value})
+                        self.assertEqual(resp.status_code, 200)
+                        self.assertEqual(resp.content, content)
+
     def test_send_message_sets_processing_before_worker_thread_starts(self):
         app = create_app()
 

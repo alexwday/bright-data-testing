@@ -38,11 +38,12 @@ def build_system_prompt() -> str:
 - Do not use nested bullets.
 - Do not add conversational closers like "let me know if you need anything else."
 - When files are downloaded, include markdown links using this path format:
-  - `/api/files/download?path=<exact_filename>`
+  - `/api/files/download?path=<url_encoded_filename>`
+  - URL-encode the filename in the query string (for example spaces as `%20`, `(` as `%28`, `)` as `%29`).
 - Preferred final response structure:
   1. `## Outcome` with 1 short sentence.
   2. `## Documents` with one flat bullet per item in this format:
-     - `- **<document type>**: [<filename>](/api/files/download?path=<filename>) - <short verification note>`
+     - `- **<document type>**: [<filename>](/api/files/download?path=<url_encoded_filename>) - <short verification note>`
   3. `## Missing` only if something was not found, with one bullet per missing item and brief reason.
   4. `## Notes` only when truly needed (for substitutions, quarter caveats, or validation warnings).
 - For non-download tasks, replace `## Documents` with `## Findings` and keep the same concise bullet style.

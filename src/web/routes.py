@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -165,13 +166,42 @@ async def get_system_config():
 
 @router.get("/api/files/download")
 async def download_file(path: str):
-    """Serve a downloaded file. Path-traversal protected."""
-    dl_dir = Path(get_config().download.base_dir).resolve()
-    filepath = (dl_dir / path).resolve()
+    """Serve a downloaded file.
 
-    if not str(filepath).startswith(str(dl_dir)):
-        raise HTTPException(status_code=403, detail="Access denied")
-    if not filepath.exists():
+    Accepts basename links (preferred) and normalizes legacy absolute/relative
+    paths emitted by the model in older responses.
+    """
+    dl_dir = Path(get_config().download.base_dir).resolve()
+    raw_path = (path or "").strip()
+    if not raw_path:
+        raise HTTPException(status_code=400, detail="File path is required")
+
+    normalized = unquote(raw_path).replace("\\", "/").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="File path is required")
+
+    provided = Path(normalized)
+    candidate_paths: list[Path] = []
+
+    # 1) Direct absolute path if it still points inside downloads.
+    if provided.is_absolute():
+        candidate_paths.append(provided.resolve())
+    else:
+        # 2) Relative path under downloads (handles nested paths if present).
+        candidate_paths.append((dl_dir / provided).resolve())
+
+    # 3) Basename fallback for links that include absolute/nested prefixes.
+    basename = provided.name
+    if basename:
+        candidate_paths.append((dl_dir / basename).resolve())
+
+    filepath: Path | None = None
+    for candidate in candidate_paths:
+        if str(candidate).startswith(str(dl_dir)) and candidate.exists():
+            filepath = candidate
+            break
+
+    if filepath is None:
         raise HTTPException(status_code=404, detail="File not found")
 
     return FileResponse(filepath, filename=filepath.name)

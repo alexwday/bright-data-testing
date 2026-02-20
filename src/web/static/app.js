@@ -110,9 +110,6 @@ async function sendMessage() {
         state.chatId = data.chat_id;
         state.messageOffset += 1; // Skip the user message we already rendered
 
-        // Show status section
-        document.getElementById("status-section").style.display = "";
-
         startPolling();
     } catch (err) {
         console.error("[send error]", err);
@@ -243,8 +240,6 @@ function newChat() {
         </div>
     `;
     renderWelcomeChips();
-
-    document.getElementById("status-section").style.display = "none";
     setProcessing(false);
     document.getElementById("chat-input").focus();
 }
@@ -473,12 +468,15 @@ function addProgressFile(msg) {
     const fileEl = document.createElement("div");
     fileEl.className = "progress-file";
     const size = formatBytes(msg.file_size || 0);
-    const ext = (msg.filename || "").split(".").pop().toUpperCase();
-    const downloadUrl = `/api/files/download?path=${encodeURIComponent(msg.filename || "")}`;
+    const downloadName = msg.filename || extractDownloadFilename(msg.file_path) || "file";
+    const ext = downloadName.includes(".")
+        ? downloadName.split(".").pop().toUpperCase()
+        : "FILE";
+    const downloadUrl = buildDownloadUrl(msg.file_path || msg.filename || "");
     fileEl.innerHTML = `
         <div class="file-card-mini">
             <span class="file-card-mini-icon">${ext}</span>
-            <a href="${downloadUrl}" class="file-card-mini-name" target="_blank">${escapeHtml(msg.filename || "file")}</a>
+            <a href="${downloadUrl}" class="file-card-mini-name" target="_blank">${escapeHtml(downloadName)}</a>
             <span class="file-card-mini-size">${size}</span>
         </div>
     `;
@@ -486,7 +484,7 @@ function addProgressFile(msg) {
 
     // Update status
     const statusText = state.progressCard.querySelector(".progress-status-text");
-    statusText.textContent = `Downloaded: ${msg.filename}`;
+    statusText.textContent = `Downloaded: ${downloadName}`;
     scrollToBottom();
 }
 
@@ -543,7 +541,9 @@ function addProgressWarning(msg) {
 
 function finalizeProgressCard() {
     if (!state.progressCard) return;
+    const completedCard = state.progressCard;
     stopElapsedTimer();
+    const container = document.getElementById("chat-messages");
 
     // Show final elapsed time
     const totalElapsed = state.processingStartTime
@@ -561,14 +561,14 @@ function finalizeProgressCard() {
     }
 
     // Update header to show complete
-    const spinner = state.progressCard.querySelector(".progress-spinner");
+    const spinner = completedCard.querySelector(".progress-spinner");
     if (spinner) {
         spinner.classList.remove("progress-spinner");
         spinner.classList.add("progress-done-icon");
         spinner.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>';
     }
 
-    const statusText = state.progressCard.querySelector(".progress-status-text");
+    const statusText = completedCard.querySelector(".progress-status-text");
     const totalDuration = state.progressSteps.reduce((sum, s) => {
         const ms = s.msg?.tool_duration_ms || 0;
         return sum + ms;
@@ -577,25 +577,35 @@ function finalizeProgressCard() {
     const durationStr = totalDuration > 0 ? ` in ${(totalDuration / 1000).toFixed(1)}s` : "";
     statusText.textContent = `Completed ${toolSteps} tool call${toolSteps !== 1 ? "s" : ""}${durationStr}`;
 
-    state.progressCard.classList.add("progress-complete");
+    completedCard.classList.add("progress-complete");
+
+    // Keep details visible after completion so users can inspect what happened.
+    const stepsContainer = completedCard.querySelector(".progress-steps-container");
+    const expandIcon = completedCard.querySelector(".progress-expand-icon");
+    if (stepsContainer && state.progressSteps.length > 0) {
+        stepsContainer.hidden = false;
+        completedCard.classList.add("is-expanded");
+        if (expandIcon) expandIcon.style.transform = "rotate(180deg)";
+    }
 
     // Render standalone file download cards below the progress card
     if (state.progressFiles.length > 0) {
-        const container = document.getElementById("chat-messages");
         const filesEl = document.createElement("div");
         filesEl.className = "message downloads-summary";
         let cardsHtml = state.progressFiles.map(f => {
             const fsize = formatBytes(f.file_size || 0);
-            const fext = (f.filename || "").split(".").pop().toUpperCase();
-            const furl = `/api/files/download?path=${encodeURIComponent(f.filename || "")}`;
+            const fname = f.filename || extractDownloadFilename(f.file_path) || "file";
+            const fext = fname.includes(".")
+                ? fname.split(".").pop().toUpperCase()
+                : "FILE";
+            const furl = buildDownloadUrl(f.file_path || f.filename || "");
             return `
                 <a href="${furl}" class="file-card" target="_blank">
                     <div class="file-icon">${fext}</div>
                     <div class="file-info">
-                        <div class="file-name">${escapeHtml(f.filename || "file")}</div>
+                        <div class="file-name">${escapeHtml(fname)}</div>
                         <div class="file-size">${fsize}</div>
                     </div>
-                    <div class="file-open-label">Open</div>
                 </a>
             `;
         }).join("");
@@ -606,8 +616,14 @@ function finalizeProgressCard() {
         container.appendChild(filesEl);
     }
 
+    // Keep the status dropdown card as the last block so it's visible right after completion.
+    if (container) {
+        container.appendChild(completedCard);
+    }
+
     // Detach from state so next task gets a new card
     state.progressCard = null;
+    scrollToBottom();
 }
 
 function removeProgressCard() {
@@ -641,8 +657,6 @@ function setProcessing(processing) {
     const input = document.getElementById("chat-input");
     const btn = document.getElementById("send-btn");
     const wrapper = document.getElementById("input-wrapper");
-    const dot = document.querySelector(".status-dot");
-    const statusText = document.querySelector(".status-text");
 
     input.disabled = processing;
     btn.disabled = processing;
@@ -650,13 +664,9 @@ function setProcessing(processing) {
     if (processing) {
         input.placeholder = "Agent is working...";
         wrapper.classList.add("processing");
-        if (dot) dot.classList.add("active");
-        if (statusText) statusText.textContent = "Processing";
     } else {
         input.placeholder = "Describe your research task...";
         wrapper.classList.remove("processing");
-        if (dot) dot.classList.remove("active");
-        if (statusText) statusText.textContent = "Idle";
         input.focus();
     }
 }
@@ -726,6 +736,52 @@ function sanitizeUrl(url) {
     }
 
     return null;
+}
+
+function extractDownloadFilename(rawPath) {
+    if (rawPath == null) return "";
+
+    let text = String(rawPath).trim();
+    if (!text) return "";
+
+    try {
+        text = decodeURIComponent(text);
+    } catch {
+        // Keep original text when the path is not valid percent-encoding.
+    }
+
+    text = text.replace(/\\/g, "/");
+    const parts = text.split("/").filter(Boolean);
+    return parts.length > 0 ? parts[parts.length - 1] : text;
+}
+
+function buildDownloadUrl(rawPath) {
+    const filename = extractDownloadFilename(rawPath);
+    if (!filename) return "/api/files/download";
+    return `/api/files/download?path=${encodeURIComponent(filename)}`;
+}
+
+function normalizeDownloadHref(url) {
+    if (!url) return url;
+
+    let normalized = url.trim().replace(/&amp;/g, "&");
+    if (!normalized.includes("/api/files/download")) return normalized;
+
+    try {
+        const parsed = new URL(normalized, window.location.origin);
+        if (parsed.pathname !== "/api/files/download") return normalized;
+
+        const rawPath = parsed.searchParams.get("path") || "";
+        const filename = extractDownloadFilename(rawPath);
+        return filename ? buildDownloadUrl(filename) : "/api/files/download";
+    } catch {
+        const marker = "/api/files/download?path=";
+        const idx = normalized.indexOf(marker);
+        if (idx === -1) return normalized;
+        const rawPath = normalized.slice(idx + marker.length);
+        const filename = extractDownloadFilename(rawPath);
+        return filename ? buildDownloadUrl(filename) : "/api/files/download";
+    }
 }
 
 function truncate(str, len) {
@@ -1024,12 +1080,59 @@ function renderMarkdown(text) {
 
 function renderInlineMarkdown(text) {
     let html = text;
-    html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, rawUrl) => {
-        const safeUrl = sanitizeUrl(rawUrl);
-        if (!safeUrl) return `${label} (${rawUrl})`;
-        const href = escapeHtmlAttr(safeUrl);
-        return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
-    });
+
+    // Parse markdown links with balanced parentheses in URLs so filenames like
+    // "(Q4)" stay intact in inline download links.
+    const renderedParts = [];
+    let cursor = 0;
+
+    while (cursor < html.length) {
+        const labelStart = html.indexOf("[", cursor);
+        if (labelStart === -1) {
+            renderedParts.push(html.slice(cursor));
+            break;
+        }
+
+        renderedParts.push(html.slice(cursor, labelStart));
+
+        const labelEnd = html.indexOf("]", labelStart + 1);
+        if (labelEnd === -1 || html[labelEnd + 1] !== "(") {
+            renderedParts.push(html[labelStart]);
+            cursor = labelStart + 1;
+            continue;
+        }
+
+        let urlEnd = labelEnd + 2;
+        let depth = 1;
+        while (urlEnd < html.length && depth > 0) {
+            const ch = html[urlEnd];
+            if (ch === "(") depth += 1;
+            if (ch === ")") depth -= 1;
+            urlEnd += 1;
+        }
+
+        if (depth !== 0) {
+            renderedParts.push(html.slice(labelStart));
+            cursor = html.length;
+            break;
+        }
+
+        const label = html.slice(labelStart + 1, labelEnd);
+        const rawUrl = html.slice(labelEnd + 2, urlEnd - 1).trim();
+        const normalizedUrl = normalizeDownloadHref(rawUrl);
+        const safeUrl = sanitizeUrl(normalizedUrl);
+
+        if (!safeUrl) {
+            renderedParts.push(`${label} (${rawUrl})`);
+        } else {
+            const href = escapeHtmlAttr(safeUrl);
+            renderedParts.push(`<a href="${href}" target="_blank" rel="noopener">${label}</a>`);
+        }
+
+        cursor = urlEnd;
+    }
+
+    html = renderedParts.join("");
     html = html.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
     html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
